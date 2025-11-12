@@ -1,50 +1,43 @@
-import torch, torch.nn as nn, torch.optim as optim, torchvision as tv, time
-device = torch.device("cuda"); print("Device:", device)
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import tqdm
 
-# ⚙️ Torch-Optimierungen
-torch.backends.cudnn.benchmark = True
-torch.set_float32_matmul_precision('high')
+# Device wählen
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Device:", device)
 
-# Dataset – größere Batches + paralleles Laden
-tfm = tv.transforms.Compose([
-    tv.transforms.ToTensor(),
-    tv.transforms.Normalize((0.5,), (0.5,))
-])
-train = tv.datasets.FashionMNIST("./data", train=True, download=True, transform=tfm)
-test = tv.datasets.FashionMNIST("./data", train=False, download=True, transform=tfm)
-train_loader = torch.utils.data.DataLoader(train, batch_size=2048, shuffle=True, num_workers=8, pin_memory=True)
-test_loader  = torch.utils.data.DataLoader(test, batch_size=4096, num_workers=8, pin_memory=True)
-
-# Modell – größer, um GPU auszulasten
+# 🧠 Einfaches Modell: 2 Eingaben (x, y) -> 1 Ausgabe (x + y)
 model = nn.Sequential(
-    nn.Flatten(),
-    nn.Linear(784, 2048), nn.GELU(),
-    nn.Linear(2048, 1024), nn.GELU(),
-    nn.Linear(1024, 512), nn.GELU(),
-    nn.Linear(512, 10)
+    nn.Linear(2, 8), 
+    nn.ReLU(),
+    nn.Linear(8, 8),
+    nn.ReLU(),
+    nn.Linear(8, 8),
+    nn.ReLU(),
+    nn.Linear(8, 1)
 ).to(device)
 
-model = torch.compile(model)  # 🔥 nutzt TorchDynamo für GPU-Optimierung
+opt = optim.Adam(model.parameters(), lr=0.01)
+loss_fn = nn.MSELoss()
 
-opt = optim.AdamW(model.parameters(), lr=2e-3)
-loss_fn = nn.CrossEntropyLoss()
+# 📊 Trainingsdaten erzeugen
+X = torch.rand(10000, 2, device=device) * 10  # Zufällige x, y Werte
+y = X.sum(dim=1, keepdim=True)                # Ziel: x + y
 
-# Training
-for e in range(50):
-    model.train(); t0 = time.time()
-    for x, y in train_loader:
-        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-        opt.zero_grad(set_to_none=True)
-        loss = loss_fn(model(x), y)
-        loss.backward()
-        opt.step()
-    print(f"Epoche {e+1}: Loss {loss.item():.4f}, Zeit {time.time()-t0:.1f}s")
+# 🔁 Training
+for epoch in tqdm.tqdm(range(100000)):
+    opt.zero_grad()
+    pred = model(X)
+    loss = loss_fn(pred, y)
+    loss.backward()
+    opt.step()
 
-# Test
-model.eval(); correct = total = 0
+
+# 🧪 Test
+test = torch.tensor([[2.0, 3.0], [5.5, 1.5], [10.0, 0.5]], device=device)
 with torch.no_grad():
-    for x, y in test_loader:
-        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-        pred = model(x).argmax(1)
-        correct += (pred == y).sum().item(); total += y.size(0)
-print(f"✅ Genauigkeit: {100*correct/total:.2f}%")
+    result = model(test)
+print("\nTest:")
+for inp, out in zip(test, result):
+    print(f"{inp.tolist()} -> {out.item():.3f}")
